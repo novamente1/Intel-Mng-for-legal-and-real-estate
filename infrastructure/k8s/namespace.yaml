@@ -4,4 +4,5 @@ metadata:
   name: platform
   labels:
     name: platform
-
+    environment: production
+    managed-by: kubernetes

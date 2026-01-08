@@ -5,8 +5,15 @@ metadata:
   namespace: platform
   labels:
     app: api
+    component: backend
+    version: v1
 spec:
   replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: api
@@ -14,17 +21,126 @@ spec:
     metadata:
       labels:
         app: api
+        component: backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
     spec:
+      serviceAccountName: platform-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - name: api
-        image: platform/api:latest
+        image: gcr.io/PROJECT_ID/platform-api:latest
+        imagePullPolicy: Always
         ports:
-        - containerPort: 3000
+        - name: http
+          containerPort: 3000
+          protocol: TCP
         env:
+        # ConfigMap values
         - name: NODE_ENV
-          value: "production"
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: NODE_ENV
         - name: PORT
-          value: "3000"
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: PORT
+        - name: API_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: API_VERSION
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: LOG_LEVEL
+        - name: CORS_ORIGIN
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: CORS_ORIGIN
+        - name: RATE_LIMIT_WINDOW_MS
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RATE_LIMIT_WINDOW_MS
+        - name: RATE_LIMIT_MAX_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: RATE_LIMIT_MAX_REQUESTS
+        - name: AUDIT_LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: AUDIT_LOG_LEVEL
+        - name: REDIS_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: REDIS_ENABLED
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: REDIS_PORT
+        - name: REDIS_DB
+          valueFrom:
+            configMapKeyRef:
+              name: platform-config
+              key: REDIS_DB
+        # Secret values
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: DATABASE_URL
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: JWT_SECRET
+        - name: JWT_EXPIRES_IN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: JWT_EXPIRES_IN
+        - name: JWT_REFRESH_EXPIRES_IN
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: JWT_REFRESH_EXPIRES_IN
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: REDIS_PASSWORD
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: REDIS_URL
+        - name: RBAC_ENABLED
+          valueFrom:
+            secretKeyRef:
+              name: platform-secrets
+              key: RBAC_ENABLED
         resources:
           requests:
             memory: "256Mi"
@@ -34,14 +150,42 @@ spec:
             cpu: "500m"
         livenessProbe:
           httpGet:
-            path: /health
-            port: 3000
+            path: /health/live
+            port: http
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /health
-            port: 3000
+            path: /health/ready
+            port: http
           initialDelaySeconds: 5
           periodSeconds: 5
-
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+      volumes:
+      - name: logs
+        emptyDir: {}
+      # Pod disruption budget would go here
+      # affinity:
+      #   podAntiAffinity:
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #     - weight: 100
+      #       podAffinityTerm:
+      #         labelSelector:
+      #           matchExpressions:
+      #           - key: app
+      #             operator: In
+      #             values:
+      #             - api
+      #         topologyKey: kubernetes.io/hostname

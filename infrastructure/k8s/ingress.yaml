@@ -3,12 +3,27 @@ kind: Ingress
 metadata:
   name: platform-ingress
   namespace: platform
+  labels:
+    app: platform
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    # GKE Ingress Controller
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "platform-static-ip"
+    
+    # SSL/TLS
+    networking.gke.io/managed-certificates: "platform-ssl-cert"
+    
+    # Backend configuration
+    cloud.google.com/backend-config: '{"default": "platform-backend-config"}'
+    
+    # Rate limiting
+    cloud.google.com/rate-limit: "true"
+    
+    # Health checks
+    cloud.google.com/load-balancer-type: "External"
 spec:
-  ingressClassName: nginx
   rules:
-  - host: api.platform.local
+  - host: api.platform.example.com
     http:
       paths:
       - path: /
@@ -17,18 +32,8 @@ spec:
           service:
             name: api
             port:
-              number: 3000
-  - host: app.platform.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: web
-            port:
-              number: 3000
-  - host: intelligence.platform.local
+              number: 80
+  - host: intelligence.platform.example.com
     http:
       paths:
       - path: /
@@ -37,5 +42,33 @@ spec:
           service:
             name: intelligence
             port:
-              number: 8000
-
+              number: 80
+---
+# Managed SSL Certificate (GCP)
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: platform-ssl-cert
+  namespace: platform
+spec:
+  domains:
+    - api.platform.example.com
+    - intelligence.platform.example.com
+---
+# Backend Config for health checks and timeout
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: platform-backend-config
+  namespace: platform
+spec:
+  healthCheck:
+    checkIntervalSec: 10
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 3
+    type: HTTP
+    requestPath: /health/ready
+  timeoutSec: 30
+  connectionDraining:
+    drainingTimeoutSec: 60

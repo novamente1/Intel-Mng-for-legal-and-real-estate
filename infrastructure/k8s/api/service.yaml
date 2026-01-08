@@ -5,13 +5,17 @@ metadata:
   namespace: platform
   labels:
     app: api
+    component: backend
 spec:
   type: ClusterIP
   ports:
-  - port: 3000
-    targetPort: 3000
+  - port: 80
+    targetPort: http
     protocol: TCP
     name: http
   selector:
     app: api
-
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
