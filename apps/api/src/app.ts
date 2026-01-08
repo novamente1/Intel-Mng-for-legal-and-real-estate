@@ -3,6 +3,7 @@ import 'express-async-errors'; // Must be imported before routes
 import { config } from './config';
 import { logger } from './utils/logger';
 import { db } from './models/database';
+import { redisClient } from './services/redis';
 import {
   securityMiddleware,
   requestId,
@@ -20,6 +21,9 @@ import apiRouter from './routes';
 export function createApp(): Express {
   // Initialize database connection
   db.initialize();
+
+  // Initialize Redis connection
+  redisClient.initialize();
 
   const app = express();
 
@@ -82,6 +86,7 @@ export function startServer(): void {
     server.close(async () => {
       logger.info('HTTP server closed');
       await db.close();
+      await redisClient.close();
       logger.info('Process terminated');
       process.exit(0);
     });

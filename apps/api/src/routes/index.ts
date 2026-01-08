@@ -2,6 +2,7 @@ import { Router } from 'express';
 import healthRouter from './health';
 import authRouter from './auth';
 import rbacExamplesRouter from './rbac-examples';
+import processLockRouter from './process-lock-example';
 import { config } from '../config';
 
 const router = Router();
@@ -19,6 +20,9 @@ router.use('/auth', authRouter);
 
 // RBAC example routes (for demonstration)
 router.use('/examples', rbacExamplesRouter);
+
+// Process locking example routes
+router.use('/processes', processLockRouter);
 
 // Future: Add more route modules here
 // router.use('/users', userRouter);
@@ -38,10 +42,12 @@ router.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     endpoints: {
       health: '/api/v1/health',
+      auth: '/api/v1/auth',
+      examples: '/api/v1/examples',
+      processes: '/api/v1/processes',
       // Future: Add more endpoints as they're created
     },
   });
 });
 
 export default router;
-

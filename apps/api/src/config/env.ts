@@ -32,6 +32,14 @@ const envSchema = z.object({
   
   // Audit Logging
   AUDIT_LOG_LEVEL: z.enum(['minimal', 'standard', 'verbose']).default('standard'),
+  
+  // Redis
+  REDIS_URL: z.string().url().optional(),
+  REDIS_HOST: z.string().default('localhost'),
+  REDIS_PORT: z.string().regex(/^\d+$/).transform(Number).default('6379'),
+  REDIS_PASSWORD: z.string().optional(),
+  REDIS_DB: z.string().regex(/^\d+$/).transform(Number).default('0'),
+  REDIS_ENABLED: z.string().transform((val) => val === 'true').default('true'),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -91,6 +99,14 @@ export const config = {
   },
   audit: {
     logLevel: env.AUDIT_LOG_LEVEL,
+  },
+  redis: {
+    enabled: env.REDIS_ENABLED,
+    url: env.REDIS_URL,
+    host: env.REDIS_HOST,
+    port: env.REDIS_PORT,
+    password: env.REDIS_PASSWORD,
+    db: env.REDIS_DB,
   },
 } as const;
 
