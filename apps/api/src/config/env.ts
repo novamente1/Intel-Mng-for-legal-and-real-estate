@@ -19,10 +19,19 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: z.string().regex(/^\d+$/).transform(Number).default('900000'), // 15 minutes
   RATE_LIMIT_MAX_REQUESTS: z.string().regex(/^\d+$/).transform(Number).default('100'),
   
-  // Future: Database, RBAC, Audit
-  // DATABASE_URL: z.string().url().optional(),
-  // JWT_SECRET: z.string().min(32).optional(),
-  // AUDIT_LOG_LEVEL: z.enum(['minimal', 'standard', 'verbose']).optional(),
+  // Database
+  DATABASE_URL: z.string().url(),
+  
+  // JWT Authentication
+  JWT_SECRET: z.string().min(32),
+  JWT_EXPIRES_IN: z.string().default('15m'),
+  JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
+  
+  // RBAC
+  RBAC_ENABLED: z.string().transform((val) => val === 'true').default('true'),
+  
+  // Audit Logging
+  AUDIT_LOG_LEVEL: z.enum(['minimal', 'standard', 'verbose']).default('standard'),
 });
 
 type EnvConfig = z.infer<typeof envSchema>;
@@ -69,15 +78,19 @@ export const config = {
   logging: {
     level: env.LOG_LEVEL,
   },
-  // Placeholders for future configuration
-  // database: {
-  //   url: env.DATABASE_URL,
-  // },
-  // rbac: {
-  //   // RBAC configuration
-  // },
-  // audit: {
-  //   logLevel: env.AUDIT_LOG_LEVEL,
-  // },
+  database: {
+    url: env.DATABASE_URL,
+  },
+  jwt: {
+    secret: env.JWT_SECRET,
+    expiresIn: env.JWT_EXPIRES_IN,
+    refreshExpiresIn: env.JWT_REFRESH_EXPIRES_IN,
+  },
+  rbac: {
+    enabled: env.RBAC_ENABLED,
+  },
+  audit: {
+    logLevel: env.AUDIT_LOG_LEVEL,
+  },
 } as const;
 

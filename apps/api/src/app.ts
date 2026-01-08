@@ -2,6 +2,7 @@ import express, { Express } from 'express';
 import 'express-async-errors'; // Must be imported before routes
 import { config } from './config';
 import { logger } from './utils/logger';
+import { db } from './models/database';
 import {
   securityMiddleware,
   requestId,
@@ -17,6 +18,9 @@ import apiRouter from './routes';
  * Separated for easier testing and modularity
  */
 export function createApp(): Express {
+  // Initialize database connection
+  db.initialize();
+
   const app = express();
 
   // Trust proxy (for rate limiting behind reverse proxy)
@@ -73,20 +77,17 @@ export function startServer(): void {
   });
 
   // Graceful shutdown
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down gracefully');
-    server.close(() => {
+  const gracefulShutdown = async (signal: string) => {
+    logger.info(`${signal} received, shutting down gracefully`);
+    server.close(async () => {
+      logger.info('HTTP server closed');
+      await db.close();
       logger.info('Process terminated');
       process.exit(0);
     });
-  });
+  };
 
-  process.on('SIGINT', () => {
-    logger.info('SIGINT received, shutting down gracefully');
-    server.close(() => {
-      logger.info('Process terminated');
-      process.exit(0);
-    });
-  });
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 

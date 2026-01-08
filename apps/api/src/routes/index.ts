@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import healthRouter from './health';
+import authRouter from './auth';
+import rbacExamplesRouter from './rbac-examples';
 import { config } from '../config';
 
 const router = Router();
@@ -12,10 +14,16 @@ const router = Router();
 // Health check routes
 router.use('/health', healthRouter);
 
+// Authentication routes
+router.use('/auth', authRouter);
+
+// RBAC example routes (for demonstration)
+router.use('/examples', rbacExamplesRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
-// router.use('/auth', authRouter);
-// router.use('/rbac', rbacRouter);
+// router.use('/roles', rolesRouter);
+// router.use('/permissions', permissionsRouter);
 // router.use('/audit', auditRouter);
 
 /**
