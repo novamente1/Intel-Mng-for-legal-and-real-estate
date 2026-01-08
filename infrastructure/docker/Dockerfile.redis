@@ -1,0 +1,35 @@
+# ============================================
+# Redis Dockerfile
+# Production-ready with security defaults
+# ============================================
+
+FROM redis:7-alpine
+
+# Install security updates
+RUN apk update && \
+    apk upgrade && \
+    rm -rf /var/cache/apk/*
+
+# Create redis user (Redis runs as redis user by default)
+# The official Redis image already runs as non-root
+
+# Create data directory with proper permissions
+RUN mkdir -p /data && \
+    chown -R redis:redis /data
+
+# Copy custom Redis configuration (optional)
+# COPY infrastructure/docker/redis/redis.conf /usr/local/etc/redis/redis.conf
+
+# Expose Redis port
+EXPOSE 6379
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD redis-cli ping || exit 1
+
+# Use default Redis entrypoint
+# The official Redis image handles startup
+
+# Default command (can be overridden in docker-compose)
+CMD ["redis-server", "--appendonly", "yes"]
+

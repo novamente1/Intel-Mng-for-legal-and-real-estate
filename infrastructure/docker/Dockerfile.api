@@ -1,37 +1,86 @@
-# Backend API Dockerfile
+# ============================================
+# Production-ready Node.js API Dockerfile
+# Multi-stage build for optimal image size and security
+# ============================================
+
+# Stage 1: Base image with Node.js
 FROM node:18-alpine AS base
 
-# Install dependencies only when needed
-FROM base AS deps
+# Install security updates and required packages
+RUN apk update && \
+    apk upgrade && \
+    apk add --no-cache dumb-init && \
+    rm -rf /var/cache/apk/*
+
+# Create app directory
 WORKDIR /app
+
+# Stage 2: Dependencies
+FROM base AS deps
+
+# Copy package files
 COPY package.json package-lock.json* ./
 COPY apps/api/package.json ./apps/api/
 COPY packages/*/package.json ./packages/*/
-RUN npm ci
+
+# Install dependencies (production only in final stage)
+RUN npm ci --only=production --ignore-scripts && \
+    npm cache clean --force
+
+# Stage 3: Build
+FROM base AS builder
+
+# Copy package files
+COPY package.json package-lock.json* ./
+COPY apps/api/package.json ./apps/api/
+COPY packages/*/package.json ./packages/*/
+
+# Install all dependencies (including dev dependencies for build)
+RUN npm ci --ignore-scripts
+
+# Copy source code
+COPY apps/api ./apps/api
+COPY packages ./packages
 
 # Build the application
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 RUN npm run build --workspace=@platform/api
 
-# Production image
+# Stage 4: Production runtime
 FROM base AS runner
-WORKDIR /app
 
+# Set production environment
 ENV NODE_ENV=production
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nodejs
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nodejs
 
-COPY --from=builder /app/apps/api/dist ./dist
-COPY --from=builder /app/apps/api/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
+# Set working directory
+WORKDIR /app
 
+# Copy production dependencies
+COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+
+# Copy built application
+COPY --from=builder --chown=nodejs:nodejs /app/apps/api/dist ./dist
+COPY --from=builder --chown=nodejs:nodejs /app/apps/api/package.json ./package.json
+
+# Create logs directory
+RUN mkdir -p /app/logs && \
+    chown -R nodejs:nodejs /app/logs
+
+# Switch to non-root user
 USER nodejs
 
+# Expose port
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application
+CMD ["node", "dist/index.js"]

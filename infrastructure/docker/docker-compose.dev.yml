@@ -1,0 +1,52 @@
+version: '3.8'
+
+# ============================================
+# Development Docker Compose Override
+# Extends docker-compose.yml for local development
+# ============================================
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+
+  redis:
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    environment:
+      REDIS_PASSWORD: ""
+
+  api:
+    build:
+      target: builder # Use builder stage for development
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    volumes:
+      - ../../apps/api:/app/apps/api:ro
+      - ../../packages:/app/packages:ro
+      - api_node_modules:/app/node_modules
+    read_only: false # Allow file watching in development
+
+  intelligence:
+    build:
+      target: builder # Use builder stage for development
+    environment:
+      ENV: development
+    volumes:
+      - ../../services/intelligence/src:/app/src:ro
+    read_only: false # Allow file watching in development
+
+volumes:
+  postgres_dev_data:
+  api_node_modules:
+

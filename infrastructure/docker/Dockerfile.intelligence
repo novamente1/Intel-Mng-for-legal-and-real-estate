@@ -1,25 +1,91 @@
-# Intelligence Services Dockerfile
+# ============================================
+# Production-ready Python Intelligence Service Dockerfile
+# Multi-stage build for optimal image size and security
+# ============================================
+
+# Stage 1: Base image with Python
 FROM python:3.10-slim AS base
 
+# Install security updates and required packages
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    dumb-init \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
 WORKDIR /app
 
+# Stage 2: Dependencies
+FROM base AS deps
+
 # Install Poetry
-RUN pip install poetry==1.7.0 && \
+RUN pip install --no-cache-dir poetry==1.7.0 && \
     poetry config virtualenvs.create false
 
 # Copy dependency files
 COPY services/intelligence/pyproject.toml services/intelligence/poetry.lock* ./
 
-# Install dependencies
-RUN poetry install --no-dev --no-interaction --no-ansi
+# Install production dependencies only
+RUN poetry install --no-dev --no-interaction --no-ansi && \
+    pip cache purge
+
+# Stage 3: Build (if needed for compiled extensions)
+FROM base AS builder
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN pip install --no-cache-dir poetry==1.7.0 && \
+    poetry config virtualenvs.create false
+
+# Copy dependency files
+COPY services/intelligence/pyproject.toml services/intelligence/poetry.lock* ./
+
+# Install all dependencies (including dev for build)
+RUN poetry install --no-interaction --no-ansi
+
+# Stage 4: Production runtime
+FROM base AS runner
+
+# Set production environment
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Create non-root user for security
+RUN groupadd --system --gid 1001 python && \
+    useradd --system --uid 1001 --gid python python
+
+# Copy production dependencies
+COPY --from=deps --chown=python:python /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=deps --chown=python:python /usr/local/bin /usr/local/bin
 
 # Copy application code
-COPY services/intelligence/src ./src
+COPY --from=builder --chown=python:python /app/services/intelligence/src ./src
 
-# Set Python path
-ENV PYTHONPATH=/app
+# Create logs directory
+RUN mkdir -p /app/logs && \
+    chown -R python:python /app/logs
 
+# Switch to non-root user
+USER python
+
+# Expose port
 EXPOSE 8000
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
 
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
