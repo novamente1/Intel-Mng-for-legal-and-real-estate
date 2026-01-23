@@ -5,3 +5,4 @@ This directory will contain:
 - Endpoint contract definitions
 - Service-to-service communication contracts
 
+

@@ -562,3 +562,4 @@ COMMENT ON COLUMN audit_logs.created_at IS 'Immutable timestamp - never changes'
 COMMENT ON COLUMN processes.metadata IS 'JSONB field for flexible process-specific data';
 COMMENT ON COLUMN audit_logs.details IS 'JSONB field for flexible event-specific data';
 
+

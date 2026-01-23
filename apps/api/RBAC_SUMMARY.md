@@ -168,3 +168,4 @@ curl -X GET "http://localhost:3000/api/v1/examples/permissions/check?permission=
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
+

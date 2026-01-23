@@ -12,3 +12,4 @@ class Config:
     ENV = os.getenv("ENV", "development")
     # Add more configuration as needed
 
+

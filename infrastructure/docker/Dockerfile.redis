@@ -33,3 +33,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
 # Default command (can be overridden in docker-compose)
 CMD ["redis-server", "--appendonly", "yes"]
 
+

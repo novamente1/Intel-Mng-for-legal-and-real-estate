@@ -138,3 +138,4 @@ ON CONFLICT (role_id, permission_id) DO NOTHING;
 -- WHERE u.email = 'admin@platform.com' AND r.name = 'super_admin'
 -- ON CONFLICT (user_id, role_id) DO NOTHING;
 
+

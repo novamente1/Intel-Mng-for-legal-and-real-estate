@@ -195,3 +195,4 @@ docker-compose down -v
 6. Enable TLS/SSL for database connections
 7. Configure backup strategies
 
+

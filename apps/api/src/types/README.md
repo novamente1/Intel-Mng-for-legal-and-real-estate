@@ -5,3 +5,4 @@ This directory will contain:
 - Interface definitions
 - Type guards
 
+

@@ -205,3 +205,4 @@ logger.error('Database error', { error, context });
 - [ ] API documentation (OpenAPI/Swagger)
 - [ ] Unit and integration tests
 
+

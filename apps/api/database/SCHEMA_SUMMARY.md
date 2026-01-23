@@ -155,3 +155,4 @@ psql -U postgres -d platform_db -f database/schema-comprehensive.sql
 - **SOX** - Financial data tracking, change audit trail
 - **General** - Immutable audit logs, complete traceability
 
+

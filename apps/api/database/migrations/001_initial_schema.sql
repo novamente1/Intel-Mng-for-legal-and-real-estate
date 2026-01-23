@@ -5,3 +5,4 @@
 -- See schema.sql for the complete schema definition
 -- This file can be used with migration tools like node-pg-migrate or db-migrate
 
+

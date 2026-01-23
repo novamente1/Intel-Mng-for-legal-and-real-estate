@@ -178,3 +178,4 @@ Minimal Kubernetes setup for GKE with managed external services (Cloud SQL, Memo
 7. **Set up Alerts** for critical metrics
 8. **Document Runbooks** for common issues
 
+

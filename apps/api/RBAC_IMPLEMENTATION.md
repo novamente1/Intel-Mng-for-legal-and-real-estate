@@ -229,3 +229,4 @@ RBAC_ENABLED=true
 - System roles cannot be deleted
 - All permission checks are database-backed
 
+

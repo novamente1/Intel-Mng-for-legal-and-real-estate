@@ -220,3 +220,4 @@ UNION ALL
 SELECT user_id, email, permission_id, permission_name, resource, action, 'direct' AS source
 FROM user_direct_permissions;
 
+

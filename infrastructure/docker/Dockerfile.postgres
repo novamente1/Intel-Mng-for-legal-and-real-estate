@@ -32,3 +32,4 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
 # Use default PostgreSQL entrypoint
 # The official PostgreSQL image handles initialization and startup
 
+

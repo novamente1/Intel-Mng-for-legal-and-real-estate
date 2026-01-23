@@ -5,3 +5,4 @@ This directory will contain:
 - Component prop types
 - API response types
 
+
