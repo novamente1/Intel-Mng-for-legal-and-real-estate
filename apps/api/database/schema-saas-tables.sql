@@ -21,8 +21,8 @@ CREATE TABLE saas_tenants (
     subdomain VARCHAR(100) UNIQUE, -- tenant subdomain
     
     -- status and configuration
-    status VARCHAR(50) NOT NULL DEFAULT 'active',
-    tier VARCHAR(50) DEFAULT 'standard',
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', -- uppercase status values
+    tier VARCHAR(50) DEFAULT 'STANDARD',
     max_users INTEGER DEFAULT 10,
     max_storage_gb INTEGER DEFAULT 10,
     
@@ -31,8 +31,11 @@ CREATE TABLE saas_tenants (
     isolation_level VARCHAR(50) DEFAULT 'logical', -- 'logical' or 'physical'
     
     -- Metadata
-    metadata JSONB DEFAULT '{}'::jsonb, -- Configurações específicas do tenant
-    settings JSONB DEFAULT '{}'::jsonb, -- Preferências e configurações
+    metadata JSONB DEFAULT '{}'::jsonb, -- tenant-specific configurations
+    settings JSONB DEFAULT '{}'::jsonb, -- preferences and settings
+    
+    -- dynamic rules (JSONB for flexible rule configuration)
+    dynamic_rules JSONB DEFAULT '{}'::jsonb, -- dynamic business rules and policies
     
     -- Compliance e Auditoria
     data_residency VARCHAR(100), -- Região de residência dos dados (GDPR)
@@ -47,24 +50,29 @@ CREATE TABLE saas_tenants (
     deleted_by UUID REFERENCES users(id),
     
     -- Constraints
-    CONSTRAINT valid_status CHECK (status IN ('active', 'suspended', 'inactive', 'trial', 'expired')),
-    CONSTRAINT valid_tier CHECK (tier IN ('trial', 'standard', 'premium', 'enterprise')),
+    CONSTRAINT valid_status CHECK (status IN ('ACTIVE', 'SUSPENDED', 'INACTIVE', 'TRIAL', 'EXPIRED')),
+    CONSTRAINT valid_tier CHECK (tier IN ('TRIAL', 'STANDARD', 'PREMIUM', 'ENTERPRISE')),
     CONSTRAINT valid_isolation_level CHECK (isolation_level IN ('logical', 'physical')),
     CONSTRAINT tenant_id_format CHECK (tenant_id ~ '^[a-z0-9_-]+$')
 );
 
--- Índices para performance e isolamento
+-- Indexes for performance and isolation
 CREATE INDEX idx_saas_tenants_tenant_id ON saas_tenants(tenant_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_saas_tenants_status ON saas_tenants(status) WHERE deleted_at IS NULL;
 CREATE INDEX idx_saas_tenants_domain ON saas_tenants(domain) WHERE deleted_at IS NULL;
 CREATE INDEX idx_saas_tenants_subdomain ON saas_tenants(subdomain) WHERE deleted_at IS NULL;
 CREATE INDEX idx_saas_tenants_created_at ON saas_tenants(created_at);
 
--- Comentários para documentação
-COMMENT ON TABLE saas_tenants IS 'Tabela de tenants para isolamento multi-tenant (SaaS)';
-COMMENT ON COLUMN saas_tenants.tenant_id IS 'Identificador único do tenant - usado para isolamento de dados em todas as tabelas';
-COMMENT ON COLUMN saas_tenants.isolation_level IS 'Nível de isolamento: logical (shared DB com tenant_id) ou physical (dedicated DB)';
-COMMENT ON COLUMN saas_tenants.database_schema IS 'Schema PostgreSQL dedicado para isolamento físico (quando isolation_level = physical)';
+-- GIN index for dynamic_rules JSONB
+CREATE INDEX idx_saas_tenants_dynamic_rules ON saas_tenants USING GIN(dynamic_rules) WHERE deleted_at IS NULL;
+
+-- Documentation comments
+COMMENT ON TABLE saas_tenants IS 'Multi-tenant isolation table (SaaS)';
+COMMENT ON COLUMN saas_tenants.tenant_id IS 'Unique tenant identifier - used for data isolation in all tables';
+COMMENT ON COLUMN saas_tenants.isolation_level IS 'Isolation level: logical (shared DB with tenant_id) or physical (dedicated DB)';
+COMMENT ON COLUMN saas_tenants.database_schema IS 'Dedicated PostgreSQL schema for physical isolation (when isolation_level = physical)';
+COMMENT ON COLUMN saas_tenants.dynamic_rules IS 'JSONB field for dynamic business rules and policies configuration';
+COMMENT ON COLUMN saas_tenants.status IS 'Tenant status in uppercase (ACTIVE, SUSPENDED, INACTIVE, TRIAL, EXPIRED)';
 
 -- ============================================
 -- SYSTEM_AUDIT_TRAIL TABLE
@@ -73,10 +81,12 @@ COMMENT ON COLUMN saas_tenants.database_schema IS 'Schema PostgreSQL dedicado pa
 CREATE TABLE system_audit_trail (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     
-    -- hash chain
+    -- hash chain (immutable audit chain)
     prev_hash VARCHAR(64), -- hash of previous record (NULL for first)
     curr_hash VARCHAR(64) NOT NULL, -- hash of current record (SHA-256)
     hash_chain_index BIGSERIAL, -- sequential index in chain
+    chain_id UUID, -- chain identifier for grouping related audit records
+    chain_sequence BIGINT, -- sequence number within the chain
     
     -- multi-tenant isolation
     tenant_id VARCHAR(100) REFERENCES saas_tenants(tenant_id) ON DELETE CASCADE,
@@ -139,9 +149,11 @@ CREATE TABLE system_audit_trail (
     CONSTRAINT prev_hash_format CHECK (prev_hash IS NULL OR prev_hash ~ '^[a-f0-9]{64}$')
 );
 
--- Índices para performance
+-- Indexes for performance
 CREATE INDEX idx_audit_trail_tenant_id ON system_audit_trail(tenant_id);
 CREATE INDEX idx_audit_trail_hash_chain_index ON system_audit_trail(hash_chain_index DESC);
+CREATE INDEX idx_audit_trail_chain_id ON system_audit_trail(chain_id) WHERE chain_id IS NOT NULL;
+CREATE INDEX idx_audit_trail_chain_sequence ON system_audit_trail(chain_id, chain_sequence) WHERE chain_id IS NOT NULL;
 CREATE INDEX idx_audit_trail_curr_hash ON system_audit_trail(curr_hash);
 CREATE INDEX idx_audit_trail_prev_hash ON system_audit_trail(prev_hash) WHERE prev_hash IS NOT NULL;
 CREATE INDEX idx_audit_trail_user_id ON system_audit_trail(user_id);
@@ -154,12 +166,12 @@ CREATE INDEX idx_audit_trail_session_id ON system_audit_trail(session_id) WHERE 
 CREATE INDEX idx_audit_trail_compliance ON system_audit_trail(compliance_flags) WHERE compliance_flags IS NOT NULL;
 CREATE INDEX idx_audit_trail_legal_hold ON system_audit_trail(legal_hold) WHERE legal_hold = true;
 
--- Índice composto para consultas comuns
+-- Composite indexes for common queries
 CREATE INDEX idx_audit_trail_tenant_time ON system_audit_trail(tenant_id, created_at DESC);
 CREATE INDEX idx_audit_trail_user_time ON system_audit_trail(user_id, created_at DESC);
 CREATE INDEX idx_audit_trail_resource_time ON system_audit_trail(resource_type, resource_id, created_at DESC);
 
--- Índice GIN para JSONB
+-- GIN indexes for JSONB
 CREATE INDEX idx_audit_trail_details ON system_audit_trail USING GIN(details);
 CREATE INDEX idx_audit_trail_before_state ON system_audit_trail USING GIN(before_state) WHERE before_state IS NOT NULL;
 CREATE INDEX idx_audit_trail_after_state ON system_audit_trail USING GIN(after_state) WHERE after_state IS NOT NULL;
@@ -173,6 +185,8 @@ CREATE OR REPLACE FUNCTION calculate_audit_hash(
     p_id UUID,
     p_prev_hash VARCHAR(64),
     p_tenant_id VARCHAR(100),
+    p_chain_id UUID,
+    p_chain_sequence BIGINT,
     p_event_type VARCHAR(100),
     p_action VARCHAR(50),
     p_user_id UUID,
@@ -186,10 +200,12 @@ DECLARE
     hash_input TEXT;
     calculated_hash VARCHAR(64);
 BEGIN
-    -- concatenate relevant fields to form the hash
+    -- concatenate relevant fields to form the hash (including chain fields)
     hash_input := COALESCE(p_id::TEXT, '') || '|' ||
                   COALESCE(p_prev_hash, '') || '|' ||
                   COALESCE(p_tenant_id, '') || '|' ||
+                  COALESCE(p_chain_id::TEXT, '') || '|' ||
+                  COALESCE(p_chain_sequence::TEXT, '') || '|' ||
                   COALESCE(p_event_type, '') || '|' ||
                   COALESCE(p_action, '') || '|' ||
                   COALESCE(p_user_id::TEXT, '') || '|' ||
@@ -224,11 +240,25 @@ BEGIN
     NEW.prev_hash := prev_hash_value;
     NEW.hash_chain_index := COALESCE(hash_index, 0) + 1;
     
+    -- generate chain_id if not provided (for grouping related records)
+    IF NEW.chain_id IS NULL THEN
+        NEW.chain_id := uuid_generate_v4();
+    END IF;
+    
+    -- set chain_sequence if not provided
+    IF NEW.chain_sequence IS NULL THEN
+        SELECT COALESCE(MAX(chain_sequence), 0) + 1 INTO NEW.chain_sequence
+        FROM system_audit_trail
+        WHERE chain_id = NEW.chain_id;
+    END IF;
+    
     -- calculate hash of current record
     NEW.curr_hash := calculate_audit_hash(
         NEW.id,
         NEW.prev_hash,
         NEW.tenant_id,
+        NEW.chain_id,
+        NEW.chain_sequence,
         NEW.event_type,
         NEW.action,
         NEW.user_id,
@@ -287,6 +317,8 @@ BEGIN
             prev_hash,
             curr_hash,
             tenant_id,
+            chain_id,
+            chain_sequence,
             event_type,
             action,
             user_id,
@@ -308,6 +340,8 @@ BEGIN
                 ot.id,
                 ot.prev_hash,
                 ot.tenant_id,
+                ot.chain_id,
+                ot.chain_sequence,
                 ot.event_type,
                 ot.action,
                 ot.user_id,
@@ -331,12 +365,124 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Comentários para documentação
+-- Documentation comments
 COMMENT ON TABLE system_audit_trail IS 'Immutable audit trail with hash chain';
 COMMENT ON COLUMN system_audit_trail.prev_hash IS 'SHA-256 hash of previous record (NULL for first)';
 COMMENT ON COLUMN system_audit_trail.curr_hash IS 'SHA-256 hash of current record, calculated automatically';
 COMMENT ON COLUMN system_audit_trail.hash_chain_index IS 'Sequential index in chain (per tenant)';
+COMMENT ON COLUMN system_audit_trail.chain_id IS 'Chain identifier for grouping related audit records';
+COMMENT ON COLUMN system_audit_trail.chain_sequence IS 'Sequence number within the chain';
 COMMENT ON COLUMN system_audit_trail.tenant_id IS 'Each tenant has its own hash chain';
 COMMENT ON FUNCTION calculate_audit_hash IS 'Calculates SHA-256 hash including prev_hash to form chain';
 COMMENT ON FUNCTION validate_audit_hash_chain IS 'Validates hash chain integrity';
+
+-- ============================================
+-- DOCUMENTS TABLE
+-- Document management with CPO (Quality Control) support
+-- ============================================
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    
+    -- multi-tenant isolation
+    tenant_id VARCHAR(100) NOT NULL REFERENCES saas_tenants(tenant_id) ON DELETE CASCADE,
+    
+    -- document identification
+    document_number VARCHAR(100) NOT NULL, -- human-readable document identifier
+    title VARCHAR(500) NOT NULL,
+    description TEXT,
+    document_type VARCHAR(100) NOT NULL, -- 'contract', 'legal_document', 'real_estate_deed', etc.
+    category VARCHAR(100), -- document category
+    
+    -- file information
+    file_name VARCHAR(500) NOT NULL,
+    file_path VARCHAR(1000), -- storage path
+    file_size BIGINT, -- file size in bytes
+    mime_type VARCHAR(100), -- MIME type
+    file_hash VARCHAR(64), -- SHA-256 hash of file content for integrity
+    
+    -- document status
+    status VARCHAR(50) NOT NULL DEFAULT 'DRAFT', -- 'DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED'
+    version INTEGER DEFAULT 1, -- document version number
+    is_current_version BOOLEAN DEFAULT true, -- flag for current version
+    
+    -- CPO (Quality Control) fields
+    cpo_status VARCHAR(50), -- 'PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'REQUIRES_REVISION'
+    cpo_reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL, -- who reviewed
+    cpo_reviewed_at TIMESTAMP WITH TIME ZONE, -- when reviewed
+    cpo_notes TEXT, -- CPO review notes
+    cpo_checklist JSONB DEFAULT '{}'::jsonb, -- CPO quality control checklist
+    cpo_approval_required BOOLEAN DEFAULT false, -- requires CPO approval
+    cpo_approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    cpo_approved_at TIMESTAMP WITH TIME ZONE,
+    
+    -- ownership and assignment
+    owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    
+    -- relationships
+    parent_document_id UUID REFERENCES documents(id) ON DELETE SET NULL, -- for document versions
+    related_document_ids UUID[], -- array of related document IDs
+    process_id UUID, -- reference to process/workflow
+    
+    -- dates
+    document_date DATE, -- document date (not creation date)
+    expiration_date DATE, -- document expiration date
+    effective_date DATE, -- when document becomes effective
+    
+    -- metadata
+    metadata JSONB DEFAULT '{}'::jsonb, -- flexible document-specific data
+    tags TEXT[], -- document tags
+    keywords TEXT[], -- search keywords
+    
+    -- compliance
+    confidentiality_level VARCHAR(20) DEFAULT 'INTERNAL', -- 'PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED'
+    retention_policy VARCHAR(100), -- retention policy identifier
+    retention_until TIMESTAMP WITH TIME ZONE, -- when document can be deleted
+    
+    -- timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    deleted_by UUID REFERENCES users(id),
+    
+    -- constraints
+    CONSTRAINT valid_status CHECK (status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED')),
+    CONSTRAINT valid_cpo_status CHECK (cpo_status IS NULL OR cpo_status IN ('PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'REQUIRES_REVISION')),
+    CONSTRAINT valid_confidentiality CHECK (confidentiality_level IN ('PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED')),
+    CONSTRAINT unique_document_number_tenant UNIQUE (tenant_id, document_number)
+);
+
+-- Indexes for documents table
+CREATE INDEX idx_documents_tenant_id ON documents(tenant_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_document_number ON documents(document_number) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_status ON documents(status) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_cpo_status ON documents(cpo_status) WHERE deleted_at IS NULL AND cpo_status IS NOT NULL;
+CREATE INDEX idx_documents_document_type ON documents(document_type) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_owner ON documents(owner_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_created_by ON documents(created_by) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_parent ON documents(parent_document_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_process ON documents(process_id) WHERE deleted_at IS NULL AND process_id IS NOT NULL;
+CREATE INDEX idx_documents_document_date ON documents(document_date) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_expiration_date ON documents(expiration_date) WHERE deleted_at IS NULL AND expiration_date IS NOT NULL;
+CREATE INDEX idx_documents_created_at ON documents(created_at);
+
+-- Composite indexes
+CREATE INDEX idx_documents_tenant_status ON documents(tenant_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_tenant_cpo ON documents(tenant_id, cpo_status) WHERE deleted_at IS NULL AND cpo_status IS NOT NULL;
+CREATE INDEX idx_documents_version ON documents(parent_document_id, version) WHERE deleted_at IS NULL AND parent_document_id IS NOT NULL;
+
+-- GIN indexes for JSONB and arrays
+CREATE INDEX idx_documents_metadata ON documents USING GIN(metadata) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_cpo_checklist ON documents USING GIN(cpo_checklist) WHERE deleted_at IS NULL AND cpo_checklist IS NOT NULL;
+CREATE INDEX idx_documents_tags ON documents USING GIN(tags) WHERE deleted_at IS NULL;
+CREATE INDEX idx_documents_keywords ON documents USING GIN(keywords) WHERE deleted_at IS NULL;
+
+-- Documentation comments
+COMMENT ON TABLE documents IS 'Document management table with CPO (Quality Control) support';
+COMMENT ON COLUMN documents.tenant_id IS 'Multi-tenant isolation - each tenant has isolated documents';
+COMMENT ON COLUMN documents.cpo_status IS 'CPO (Quality Control) review status';
+COMMENT ON COLUMN documents.cpo_checklist IS 'JSONB field for CPO quality control checklist items';
+COMMENT ON COLUMN documents.cpo_approval_required IS 'Flag indicating if CPO approval is required before document can be finalized';
+COMMENT ON COLUMN documents.file_hash IS 'SHA-256 hash of file content for integrity verification';
 
