@@ -4,6 +4,7 @@ import healthRouter from './health';
 import authRouter from './auth';
 import rbacExamplesRouter from './rbac-examples';
 import processLockRouter from './process-lock-example';
+import documentsRouter from './documents';
 import { config } from '../config';
 
 const router = Router();
@@ -28,6 +29,9 @@ router.use('/examples', rbacExamplesRouter);
 // Process locking example routes
 router.use('/processes', processLockRouter);
 
+// Document management routes (Legal Engine)
+router.use('/documents', documentsRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
 // router.use('/roles', rolesRouter);
@@ -49,6 +53,8 @@ router.get('/', (req, res) => {
       auth: '/api/v1/auth',
       examples: '/api/v1/examples',
       processes: '/api/v1/processes',
+      documents: '/api/v1/documents',
+      sanitation_queue: '/api/v1/documents/sanitation-queue',
       // Future: Add more endpoints as they're created
     },
   });
