@@ -675,17 +675,13 @@ export class AuditService {
     const result = await db.query<HashChainValidationRow>(
       `SELECT * FROM validate_audit_hash_chain($1)`,
       [tenantId]
-    );
-
-    const rows: HashChainValidationRow[] = result.rows;
+    );    const rows: HashChainValidationRow[] = result.rows;
     const invalidRecords = rows
       .filter(row => !row.is_valid)
       .map(row => ({
         id: row.hash_chain_index.toString(),
         reason: `Hash mismatch: stored=${row.current_hash.substring(0, 8)}..., calculated=${row.calculated_hash.substring(0, 8)}...`,
-      }));
-
-    return {
+      }));    return {
       valid: invalidRecords.length === 0,
       totalRecords: result.rows.length,
       invalidRecords,

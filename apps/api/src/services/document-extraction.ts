@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { DocumentModel } from '../models/document';
 import { DocumentExtractionModel, ExtractedParty, ExtractedMonetaryValue, ExtractedDate } from '../models/document-extraction';
 import { DocumentQualityFlagModel, QualityFlagType, FlagSeverity } from '../models/document-quality-flag';
+import { DocumentFactModel, CreateDocumentFactInput } from '../models/document-fact';
 
 /**
  * Quality control thresholds (GEMS compliance)
@@ -267,6 +268,9 @@ export class DocumentExtractionService {
 
           result.extraction_id = extractionRecord.id;
 
+          // Populate document_facts for legal traceability (proof lineage)
+          await this.upsertDocumentFacts(tenantId, documentId, extraction);
+
           // Check for extraction issues
           if (extraction.warnings.length > 0) {
             await this.createQualityFlag(
@@ -477,6 +481,103 @@ export class DocumentExtractionService {
         description: `Date ${index + 1}`,
       };
     });
+  }
+
+  /**
+   * Upsert document_facts from extraction result for proof lineage.
+   * Replaces all facts for the document (delete then insert).
+   */
+  private async upsertDocumentFacts(
+    tenantId: string,
+    documentId: string,
+    extraction: FieldExtractionResult
+  ): Promise<void> {
+    await DocumentFactModel.deleteByDocumentId(documentId, tenantId);
+    const conf = extraction.field_confidences ?? {};
+    const pageNumber = 1; // Default when OCR does not provide per-page
+    const inputs: CreateDocumentFactInput[] = [];
+
+    if (extraction.process_number) {
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'process_number',
+        fact_value: extraction.process_number,
+        page_number: pageNumber,
+        confidence_score: conf.process_number ?? extraction.overall_confidence ?? null,
+      });
+    }
+    if (extraction.court) {
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'court',
+        fact_value: extraction.court,
+        page_number: pageNumber,
+        confidence_score: conf.court ?? extraction.overall_confidence ?? null,
+      });
+    }
+    if (extraction.court_type) {
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'court_type',
+        fact_value: extraction.court_type,
+        page_number: pageNumber,
+        confidence_score: extraction.overall_confidence ?? null,
+      });
+    }
+    if (extraction.court_state) {
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'court_state',
+        fact_value: extraction.court_state,
+        page_number: pageNumber,
+        confidence_score: extraction.overall_confidence ?? null,
+      });
+    }
+    for (let i = 0; i < extraction.parties.length; i++) {
+      const p = extraction.parties[i];
+      const value = `${p.name}${p.role ? ` (${p.role})` : ''}${p.cpf_cnpj ? ` [${p.cpf_cnpj}]` : ''}`;
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'party',
+        fact_value: value,
+        page_number: pageNumber,
+        confidence_score: conf.parties ?? extraction.overall_confidence ?? null,
+      });
+    }
+    for (let i = 0; i < extraction.monetary_values.length; i++) {
+      const m = extraction.monetary_values[i];
+      const value = `${m.currency} ${m.value}${m.description ? ` - ${m.description}` : ''}`;
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'monetary_value',
+        fact_value: value,
+        page_number: pageNumber,
+        confidence_score: conf.monetary_values ?? extraction.overall_confidence ?? null,
+      });
+    }
+    for (let i = 0; i < extraction.extracted_dates.length; i++) {
+      const d = extraction.extracted_dates[i];
+      const value = `${d.date}${d.description ? ` - ${d.description}` : ''} (${d.type})`;
+      inputs.push({
+        tenant_id: tenantId,
+        document_id: documentId,
+        fact_type: 'date',
+        fact_value: value,
+        page_number: pageNumber,
+        confidence_score: conf.dates ?? extraction.overall_confidence ?? null,
+      });
+    }
+
+    if (inputs.length > 0) {
+      await DocumentFactModel.createMany(inputs);
+      logger.info('Document facts populated', { documentId, tenantId, count: inputs.length });
+    }
   }
 
   /**

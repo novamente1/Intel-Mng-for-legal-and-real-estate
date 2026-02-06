@@ -8,6 +8,7 @@ import { NotFoundError, ValidationError, ConflictError } from '../utils/errors';
 import { DocumentModel } from '../models/document';
 import { DocumentExtractionModel } from '../models/document-extraction';
 import { DocumentQualityFlagModel } from '../models/document-quality-flag';
+import { DocumentFactModel } from '../models/document-fact';
 import { DocumentExtractionService, documentExtractionService } from '../services/document-extraction';
 import { AuditService, AuditAction, AuditEventType } from '../services/audit';
 import { logger } from '../utils/logger';
@@ -228,6 +229,227 @@ router.get(
           total,
           limit: parseInt(limit as string, 10),
           offset: parseInt(offset as string, 10),
+        },
+      },
+    });
+  })
+);
+
+/**
+ * GET /documents/:id/viewer-context
+ * Returns watermark data and optional fact highlight context for the secure viewer.
+ * No direct file URL. Requires tenant_id + documents:read. Logs ACCESS.
+ */
+const viewerContextSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  query: z.object({ fact_id: z.string().uuid().optional() }),
+});
+router.get(
+  '/:id/viewer-context',
+  authenticate,
+  requirePermission('documents:read'),
+  validateRequest(viewerContextSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, userId } = getTenantContext(req);
+    const { id: documentId } = req.params;
+    const factId = req.query.fact_id as string | undefined;
+
+    const document = await DocumentModel.findById(documentId, tenantId);
+    if (!document) {
+      throw new NotFoundError('Document');
+    }
+
+    let fact_context: { page_number: number; bounding_box: { x: number; y: number; width: number; height: number } } | null = null;
+    if (factId) {
+      const fact = await DocumentFactModel.findById(factId, tenantId);
+      if (fact && fact.document_id === documentId) {
+        fact_context = {
+          page_number: fact.page_number ?? 1,
+          bounding_box: fact.bounding_box ?? { x: 0, y: 0, width: 1, height: 0.05 },
+        };
+      }
+    }
+
+    const ip = req.ip ?? req.socket?.remoteAddress ?? '';
+
+    await AuditService.log({
+      tenant_id: tenantId,
+      event_type: 'document.viewer_context',
+      event_category: AuditEventCategory.DATA_ACCESS,
+      action: AuditAction.READ,
+      user_id: userId,
+      user_email: req.user!.email,
+      user_role: req.context?.role,
+      resource_type: 'document',
+      resource_id: documentId,
+      description: 'Document viewer context (watermark + fact highlight)',
+      details: { document_number: document.document_number, fact_id: factId ?? null },
+      ip_address: ip,
+      user_agent: req.get('user-agent'),
+      request_id: req.headers['x-request-id'] as string | undefined,
+      session_id: req.headers['x-session-id'] as string | undefined,
+      success: true,
+      compliance_flags: ['legal'],
+      retention_category: 'legal',
+    });
+
+    res.json({
+      success: true,
+      data: {
+        watermark: {
+          user_email: req.user!.email,
+          user_id: userId,
+          ip_address: ip,
+          timestamp: new Date().toISOString(),
+        },
+        fact_context,
+      },
+    });
+  })
+);
+
+/**
+ * GET /documents/:id/viewer-asset
+ * Streams document file for embedded viewer only. No direct file URL; access requires auth + tenant + RBAC.
+ * Disable caching; inline disposition. Logs ACCESS. Only serves if storage_path is set and file exists.
+ */
+router.get(
+  '/:id/viewer-asset',
+  authenticate,
+  requirePermission('documents:read'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, userId } = getTenantContext(req);
+    const { id } = req.params;
+
+    const document = await DocumentModel.findById(id, tenantId);
+    if (!document) {
+      throw new NotFoundError('Document');
+    }
+
+    const storagePath = document.storage_path;
+    if (!storagePath || typeof storagePath !== 'string') {
+      throw new ValidationError('Document has no storage path');
+    }
+
+    // Prevent path traversal: resolve under base and ensure result stays under base
+    const baseDir = path.resolve(process.cwd());
+    const resolvedPath = path.isAbsolute(storagePath)
+      ? path.resolve(storagePath)
+      : path.resolve(baseDir, storagePath);
+    const normalizedResolved = path.normalize(resolvedPath);
+    const relative = path.relative(baseDir, normalizedResolved);
+    if (storagePath.includes('..') || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new ValidationError('Invalid storage path');
+    }
+
+    if (!fs.existsSync(normalizedResolved)) {
+      throw new NotFoundError('Document file');
+    }
+
+    const mime = document.mime_type || getMimeType(document.file_name);
+
+    await AuditService.log({
+      tenant_id: tenantId,
+      event_type: 'document.viewer_asset',
+      event_category: AuditEventCategory.DATA_ACCESS,
+      action: AuditAction.READ,
+      user_id: userId,
+      user_email: req.user!.email,
+      user_role: req.context?.role,
+      resource_type: 'document',
+      resource_id: id,
+      description: 'Document viewer asset stream (no download URL)',
+      details: { document_number: document.document_number },
+      ip_address: req.ip ?? req.socket?.remoteAddress,
+      user_agent: req.get('user-agent'),
+      request_id: req.headers['x-request-id'] as string | undefined,
+      session_id: req.headers['x-session-id'] as string | undefined,
+      success: true,
+      compliance_flags: ['legal'],
+      retention_category: 'legal',
+    });
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', 'inline'); // display in viewer, not attachment
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    const stream = fs.createReadStream(normalizedResolved);
+    stream.on('error', (err) => {
+      logger.error('Viewer asset stream error', { err, documentId: id });
+      if (!res.headersSent) res.status(500).end();
+    });
+    stream.pipe(res);
+  })
+);
+
+/**
+ * GET /documents/:id/secure-view
+ * Secure view of document content (no download). Returns metadata and viewable content only.
+ * All queries use req.context.tenant_id only.
+ */
+router.get(
+  '/:id/secure-view',
+  authenticate,
+  requirePermission('documents:read'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, userId } = getTenantContext(req);
+    const { id } = req.params;
+
+    const document = await DocumentModel.findById(id, tenantId);
+    if (!document) {
+      throw new NotFoundError('Document');
+    }
+
+    const extraction = await DocumentExtractionModel.findByDocumentId(id, tenantId);
+
+    // Audit: document view (no download)
+    await AuditService.log({
+      tenant_id: tenantId,
+      event_type: 'document.view',
+      event_category: AuditEventCategory.DATA_ACCESS,
+      action: AuditAction.READ,
+      user_id: userId,
+      user_email: req.user!.email,
+      user_role: req.context?.role,
+      resource_type: 'document',
+      resource_id: id,
+      description: 'Document secure view (no download)',
+      details: {
+        document_number: document.document_number,
+        secure_view: true,
+      },
+      ip_address: req.ip ?? req.socket?.remoteAddress,
+      user_agent: req.get('user-agent'),
+      request_id: req.headers['x-request-id'] as string | undefined,
+      session_id: req.headers['x-session-id'] as string | undefined,
+      success: true,
+      compliance_flags: ['legal'],
+      retention_category: 'legal',
+    });
+
+    res.json({
+      success: true,
+      data: {
+        document: {
+          id: document.id,
+          document_number: document.document_number,
+          title: document.title,
+          document_type: document.document_type,
+          status_cpo: document.status_cpo,
+          ocr_processed: document.ocr_processed,
+        },
+        viewable_content: {
+          ocr_text: document.ocr_text ?? null,
+          extraction_summary: extraction
+            ? {
+                process_number: extraction.process_number,
+                court: extraction.court,
+                parties_count: extraction.parties?.length ?? 0,
+                monetary_values_count: extraction.monetary_values?.length ?? 0,
+              }
+            : null,
         },
       },
     });

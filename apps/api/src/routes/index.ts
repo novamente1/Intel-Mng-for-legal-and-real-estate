@@ -5,6 +5,8 @@ import authRouter from './auth';
 import rbacExamplesRouter from './rbac-examples';
 import processLockRouter from './process-lock-example';
 import documentsRouter from './documents';
+import factsRouter from './facts';
+import generatedDocumentsRouter from './generated-documents';
 import { config } from '../config';
 
 const router = Router();
@@ -32,6 +34,12 @@ router.use('/processes', processLockRouter);
 // Document management routes (Legal Engine)
 router.use('/documents', documentsRouter);
 
+// Facts (proof lineage / jump-back)
+router.use('/facts', factsRouter);
+
+// Generated documents (from source facts, CPO-gated)
+router.use('/generated-documents', generatedDocumentsRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
 // router.use('/roles', rolesRouter);
@@ -55,6 +63,8 @@ router.get('/', (req, res) => {
       processes: '/api/v1/processes',
       documents: '/api/v1/documents',
       sanitation_queue: '/api/v1/documents/sanitation-queue',
+      facts: '/api/v1/facts',
+      generated_documents: '/api/v1/generated-documents',
       // Future: Add more endpoints as they're created
     },
   });
