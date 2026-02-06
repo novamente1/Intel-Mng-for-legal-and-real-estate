@@ -72,6 +72,14 @@ export class ConflictError extends AppError {
   }
 }
 
+/** Invalid state machine transition (e.g. auction stage skip). API-enforced. */
+export class InvalidTransitionError extends AppError {
+  constructor(message: string, public readonly fromStage?: string, public readonly toStage?: string) {
+    super(400, message, true, 'INVALID_TRANSITION');
+    Object.setPrototypeOf(this, InvalidTransitionError.prototype);
+  }
+}
+
 export class InternalServerError extends AppError {
   constructor(message = 'Internal server error') {
     super(500, message, false, 'INTERNAL_SERVER_ERROR');

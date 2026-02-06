@@ -7,6 +7,7 @@ import processLockRouter from './process-lock-example';
 import documentsRouter from './documents';
 import factsRouter from './facts';
 import generatedDocumentsRouter from './generated-documents';
+import auctionsRouter from './auctions';
 import { config } from '../config';
 
 const router = Router();
@@ -40,6 +41,9 @@ router.use('/facts', factsRouter);
 // Generated documents (from source facts, CPO-gated)
 router.use('/generated-documents', generatedDocumentsRouter);
 
+// Auction engine (MPGA workflow)
+router.use('/auctions', auctionsRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
 // router.use('/roles', rolesRouter);
@@ -65,6 +69,7 @@ router.get('/', (req, res) => {
       sanitation_queue: '/api/v1/documents/sanitation-queue',
       facts: '/api/v1/facts',
       generated_documents: '/api/v1/generated-documents',
+      auctions: '/api/v1/auctions',
       // Future: Add more endpoints as they're created
     },
   });
