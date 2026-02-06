@@ -11,6 +11,7 @@ import {
   type DueDiligenceItem,
   isRiskHigh,
 } from '../models/auction-asset';
+import { AuctionAssetROIModel } from '../models/auction-asset-roi';
 
 const router = Router();
 
@@ -49,6 +50,26 @@ const placeBidSchema = z.object({
 const listSchema = z.object({
   query: z.object({
     stage: z.enum([...AUCTION_STAGES] as [string, ...string[]]).optional(),
+    limit: z.string().transform(Number).optional(),
+    offset: z.string().transform(Number).optional(),
+  }),
+});
+
+const roiInputsSchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    acquisition_price_cents: z.number().int().min(0).optional(),
+    taxes_itbi_cents: z.number().int().min(0).optional(),
+    legal_costs_cents: z.number().int().min(0).optional(),
+    renovation_estimate_cents: z.number().int().min(0).optional(),
+    expected_resale_value_cents: z.number().int().min(0).optional(),
+    expected_resale_date: z.string().nullable().optional(),
+  }),
+});
+
+const roiVersionsQuerySchema = z.object({
+  params: z.object({ id: z.string().uuid() }),
+  query: z.object({
     limit: z.string().transform(Number).optional(),
     offset: z.string().transform(Number).optional(),
   }),
@@ -310,6 +331,178 @@ router.post(
     });
   })
 );
+
+/**
+ * GET /auctions/assets/:id/roi
+ * Get current ROI for asset (linked to auction asset). 404 if never calculated.
+ */
+router.get(
+  '/assets/:id/roi',
+  authenticate,
+  requirePermission('auctions:read'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId } = getTenantContext(req);
+    const { id } = req.params;
+
+    const asset = await AuctionAssetModel.findById(id, tenantId);
+    if (!asset) throw new NotFoundError('Auction asset');
+
+    const roi = await AuctionAssetROIModel.getByAssetId(id, tenantId);
+    if (!roi) throw new NotFoundError('ROI (not yet calculated for this asset)');
+
+    res.json({
+      success: true,
+      data: formatROI(roi),
+    });
+  })
+);
+
+/**
+ * PUT /auctions/assets/:id/roi
+ * Update ROI inputs (partial). Recalculates outputs, versions, and audits.
+ */
+router.put(
+  '/assets/:id/roi',
+  authenticate,
+  requirePermission('auctions:update'),
+  validateRequest(roiInputsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, userId } = getTenantContext(req);
+    const { id } = req.params;
+    const body = req.body as Record<string, unknown>;
+
+    const asset = await AuctionAssetModel.findById(id, tenantId);
+    if (!asset) throw new NotFoundError('Auction asset');
+
+    const inputs: {
+      acquisition_price_cents?: number;
+      taxes_itbi_cents?: number;
+      legal_costs_cents?: number;
+      renovation_estimate_cents?: number;
+      expected_resale_value_cents?: number;
+      expected_resale_date?: string | null;
+    } = {};
+    if (typeof body.acquisition_price_cents === 'number') inputs.acquisition_price_cents = body.acquisition_price_cents;
+    if (typeof body.taxes_itbi_cents === 'number') inputs.taxes_itbi_cents = body.taxes_itbi_cents;
+    if (typeof body.legal_costs_cents === 'number') inputs.legal_costs_cents = body.legal_costs_cents;
+    if (typeof body.renovation_estimate_cents === 'number') inputs.renovation_estimate_cents = body.renovation_estimate_cents;
+    if (typeof body.expected_resale_value_cents === 'number') inputs.expected_resale_value_cents = body.expected_resale_value_cents;
+    if (body.expected_resale_date !== undefined) inputs.expected_resale_date = body.expected_resale_date == null ? null : String(body.expected_resale_date);
+
+    const { roi, isNew } = await AuctionAssetROIModel.updateInputs(id, tenantId, inputs);
+
+    await AuditService.log({
+      tenant_id: tenantId,
+      event_type: 'roi.recalculation',
+      event_category: AuditEventCategory.DATA_MODIFICATION,
+      action: AuditAction.UPDATE,
+      user_id: userId,
+      user_email: req.user!.email,
+      user_role: req.context?.role,
+      resource_type: 'auction_asset_roi',
+      resource_id: roi.id,
+      target_resource_id: id,
+      description: isNew ? 'ROI created (first calculation)' : 'ROI recalculated',
+      details: {
+        auction_asset_id: id,
+        version_number: roi.version_number,
+        net_profit_cents: roi.net_profit_cents,
+        roi_percentage: roi.roi_percentage,
+        break_even_date: roi.break_even_date,
+      },
+      ip_address: req.ip ?? req.socket?.remoteAddress,
+      user_agent: req.get('user-agent'),
+      request_id: req.headers['x-request-id'] as string | undefined,
+      session_id: req.headers['x-session-id'] as string | undefined,
+      success: true,
+      compliance_flags: ['legal'],
+      retention_category: 'legal',
+    });
+
+    res.json({
+      success: true,
+      data: formatROI(roi),
+    });
+  })
+);
+
+/**
+ * GET /auctions/assets/:id/roi/versions
+ * List versioned ROI calculations for the asset.
+ */
+router.get(
+  '/assets/:id/roi/versions',
+  authenticate,
+  requirePermission('auctions:read'),
+  validateRequest(roiVersionsQuerySchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId } = getTenantContext(req);
+    const { id } = req.params;
+    const limit = (req.query.limit as unknown) as number | undefined;
+    const offset = (req.query.offset as unknown) as number | undefined;
+
+    const asset = await AuctionAssetModel.findById(id, tenantId);
+    if (!asset) throw new NotFoundError('Auction asset');
+
+    const versions = await AuctionAssetROIModel.listVersions(id, tenantId, { limit, offset });
+
+    res.json({
+      success: true,
+      data: {
+        auction_asset_id: id,
+        versions: versions.map((v) => ({
+          id: v.id,
+          version_number: v.version_number,
+          inputs_snapshot: v.inputs_snapshot,
+          total_cost_cents: v.total_cost_cents,
+          net_profit_cents: v.net_profit_cents,
+          roi_percentage: v.roi_percentage,
+          break_even_date: v.break_even_date,
+          created_at: v.created_at,
+        })),
+        pagination: { limit: limit ?? 50, offset: offset ?? 0 },
+      },
+    });
+  })
+);
+
+function formatROI(roi: {
+  id: string;
+  auction_asset_id: string;
+  acquisition_price_cents: number;
+  taxes_itbi_cents: number;
+  legal_costs_cents: number;
+  renovation_estimate_cents: number;
+  expected_resale_value_cents: number;
+  expected_resale_date: string | null;
+  total_cost_cents: number;
+  net_profit_cents: number;
+  roi_percentage: number;
+  break_even_date: string | null;
+  version_number: number;
+  updated_at: Date;
+}) {
+  return {
+    id: roi.id,
+    auction_asset_id: roi.auction_asset_id,
+    inputs: {
+      acquisition_price_cents: roi.acquisition_price_cents,
+      taxes_itbi_cents: roi.taxes_itbi_cents,
+      legal_costs_cents: roi.legal_costs_cents,
+      renovation_estimate_cents: roi.renovation_estimate_cents,
+      expected_resale_value_cents: roi.expected_resale_value_cents,
+      expected_resale_date: roi.expected_resale_date,
+    },
+    outputs: {
+      total_cost_cents: roi.total_cost_cents,
+      net_profit_cents: roi.net_profit_cents,
+      roi_percentage: roi.roi_percentage,
+      break_even_date: roi.break_even_date,
+    },
+    version_number: roi.version_number,
+    updated_at: roi.updated_at,
+  };
+}
 
 function formatAsset(asset: {
   id: string;
