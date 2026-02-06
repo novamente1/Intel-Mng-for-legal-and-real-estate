@@ -9,6 +9,7 @@ import factsRouter from './facts';
 import generatedDocumentsRouter from './generated-documents';
 import auctionsRouter from './auctions';
 import workflowRouter from './workflow';
+import intelligenceRouter from './intelligence';
 import { config } from '../config';
 
 const router = Router();
@@ -48,6 +49,9 @@ router.use('/auctions', auctionsRouter);
 // Event-driven workflow automation
 router.use('/workflow', workflowRouter);
 
+// Rule-bound intelligence (validate, suggest, refuse; no override of CPO/risk/workflow)
+router.use('/intelligence', intelligenceRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
 // router.use('/roles', rolesRouter);
@@ -75,6 +79,7 @@ router.get('/', (req, res) => {
       generated_documents: '/api/v1/generated-documents',
       auctions: '/api/v1/auctions',
       workflow: '/api/v1/workflow',
+      intelligence: '/api/v1/intelligence',
       // Future: Add more endpoints as they're created
     },
   });

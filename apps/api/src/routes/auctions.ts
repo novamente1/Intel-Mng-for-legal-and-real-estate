@@ -12,6 +12,7 @@ import {
   isRiskHigh,
 } from '../models/auction-asset';
 import { AuctionAssetROIModel } from '../models/auction-asset-roi';
+import { validate as validateIntelligence } from '../services/intelligence';
 
 const router = Router();
 
@@ -295,10 +296,19 @@ router.post(
     const asset = await AuctionAssetModel.findById(id, tenantId);
     if (!asset) throw new NotFoundError('Auction asset');
 
-    if (isRiskHigh(asset.risk_score)) {
-      throw new AuthorizationError(
-        'Bidding is disabled for this asset due to HIGH risk score. Complete due diligence to lower risk.'
-      );
+    const intelligenceResult = await validateIntelligence({
+      tenantId,
+      resourceType: 'auction_asset',
+      resourceId: id,
+      operation: 'place_bid',
+      userId,
+      userEmail: req.user!.email,
+      userRole: req.context?.role,
+      request: req,
+    });
+    if (!intelligenceResult.allowed) {
+      const message = intelligenceResult.violations.map((v) => v.message).join('; ');
+      throw new AuthorizationError(message || 'Bidding is disabled for this asset.');
     }
 
     const bid = await AuctionBidModel.create(tenantId, id, userId, amount_cents);
