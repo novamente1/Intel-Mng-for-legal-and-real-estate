@@ -670,9 +670,7 @@ export class AuditService {
       previous_hash: string;
       calculated_hash: string;
       is_valid: boolean;
-    }
-
-    const result = await db.query<HashChainValidationRow>(
+    }    const result = await db.query<HashChainValidationRow>(
       `SELECT * FROM validate_audit_hash_chain($1)`,
       [tenantId]
     );    const rows: HashChainValidationRow[] = result.rows;
