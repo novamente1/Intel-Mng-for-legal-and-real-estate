@@ -37,8 +37,8 @@ export const authenticate = asyncHandler(
     // Verify token
     const payload: JWTPayload = AuthService.verifyToken(token);
 
-    // Get user from database
-    const user = await UserModel.findById(payload.userId);
+    // Get user from database (auth method doesn't require tenantId)
+    const user = await UserModel.findByIdForAuth(payload.userId);
 
     if (!user) {
       throw new AuthenticationError('User not found');
@@ -71,7 +71,7 @@ export const optionalAuth = asyncHandler(
       try {
         const token = authHeader.substring(7);
         const payload: JWTPayload = AuthService.verifyToken(token);
-        const user = await UserModel.findById(payload.userId);
+        const user = await UserModel.findByIdForAuth(payload.userId);
 
         if (user && user.is_active) {
           req.user = {

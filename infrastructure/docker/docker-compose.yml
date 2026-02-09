@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ============================================
 # Production-ready Docker Compose Configuration
 # Multi-service setup with secure defaults
@@ -114,7 +112,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /app/logs
 
   # ============================================
   # Python Intelligence Service
@@ -153,7 +150,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /app/logs
 
 # ============================================
 # Networks

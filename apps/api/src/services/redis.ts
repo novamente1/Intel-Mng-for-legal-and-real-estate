@@ -143,11 +143,11 @@ class RedisClient {
     }
 
     if (this.subscriber) {
-      promises.push(this.subscriber.quit().then(() => logger.info('Redis subscriber closed')));
+      promises.push(this.subscriber.quit().then(() => { logger.info('Redis subscriber closed'); }));
     }
 
     if (this.publisher) {
-      promises.push(this.publisher.quit().then(() => logger.info('Redis publisher closed')));
+      promises.push(this.publisher.quit().then(() => { logger.info('Redis publisher closed'); }));
     }
 
     await Promise.all(promises);

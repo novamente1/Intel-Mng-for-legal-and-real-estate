@@ -63,7 +63,7 @@ export async function extractTextFromPdf(filePath: string): Promise<ExtractedTex
   const { text: rawText, numpages } = await pdfParse(buffer);
 
   const trimmed = (rawText ?? '').trim();
-  const wordCount = trimmed ? trimmed.split(/\s+/).filter(Boolean).length;
+  const wordCount = trimmed ? trimmed.split(/\s+/).filter(Boolean).length : 0;
   const hasEnoughText =
     trimmed.length >= MIN_TEXT_LENGTH && wordCount >= MIN_WORDS;
 

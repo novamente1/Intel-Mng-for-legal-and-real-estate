@@ -72,8 +72,8 @@ COPY --from=deps --chown=python:python /usr/local/lib/python3.10/site-packages /
 COPY --from=deps --chown=python:python /usr/local/bin /usr/local/bin
 # Note: Tesseract OCR and poppler-utils are already installed in base stage
 
-# Copy application code
-COPY --from=builder --chown=python:python /app/services/intelligence/src ./src
+# Copy application code directly from build context
+COPY --chown=python:python services/intelligence/src ./src
 
 # Create logs directory
 RUN mkdir -p /app/logs && \
