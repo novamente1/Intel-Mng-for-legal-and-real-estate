@@ -25,6 +25,12 @@ class RedisClient {
       return;
     }
 
+    // Load-safe defaults for production
+    const maxRetries = parseInt(process.env.REDIS_MAX_RETRIES || '3', 10);
+    const connectTimeout = parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS || '10000', 10);
+    const commandTimeout = parseInt(process.env.REDIS_COMMAND_TIMEOUT_MS || '5000', 10);
+    const keepAlive = parseInt(process.env.REDIS_KEEPALIVE_MS || '30000', 10);
+
     const options: RedisOptions = {
       host: config.redis.host,
       port: config.redis.port,
@@ -34,10 +40,16 @@ class RedisClient {
         const delay = Math.min(times * 50, 2000);
         return delay;
       },
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: maxRetries,
       enableReadyCheck: true,
       enableOfflineQueue: false,
       lazyConnect: false,
+      connectTimeout,
+      commandTimeout,
+      keepAlive,
+      // Connection pool settings
+      family: 4, // Use IPv4
+      enableAutoPipelining: true, // Auto-pipeline commands
     };
 
     // Use URL if provided, otherwise use individual options

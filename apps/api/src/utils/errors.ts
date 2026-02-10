@@ -72,6 +72,13 @@ export class ConflictError extends AppError {
   }
 }
 
+export class TooManyRequestsError extends AppError {
+  constructor(message: string, public retryAfter?: number) {
+    super(429, message, true, 'TOO_MANY_REQUESTS');
+    Object.setPrototypeOf(this, TooManyRequestsError.prototype);
+  }
+}
+
 /** Invalid state machine transition (e.g. auction stage skip). API-enforced. */
 export class InvalidTransitionError extends AppError {
   constructor(message: string, public readonly fromStage?: string, public readonly toStage?: string) {

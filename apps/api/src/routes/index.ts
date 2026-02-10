@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { tenantMiddleware } from '../middleware';
-import healthRouter from './health';
 import authRouter from './auth';
 import rbacExamplesRouter from './rbac-examples';
 import processLockRouter from './process-lock-example';
@@ -19,6 +18,7 @@ import knowledgeRouter from './knowledge';
 import qualityGatesRouter from './quality-gates';
 import superAdminRouter from './super-admin';
 import dashboardsRouter from './dashboards';
+import metricsRouter from './metrics';
 import { config } from '../config';
 
 const router = Router();
@@ -31,8 +31,7 @@ const router = Router();
 // Tenant isolation (Fonte 73, Fonte 5) - level 0, before any controller. Skips /health, /auth/login, /auth/register, /auth/refresh.
 router.use(tenantMiddleware);
 
-// Health check routes
-router.use('/health', healthRouter);
+// Note: Health check routes are registered at app level (not here) to avoid tenant middleware
 
 // Authentication routes
 router.use('/auth', authRouter);
@@ -87,6 +86,9 @@ router.use('/super-admin', superAdminRouter);
 
 // Unified Dashboards
 router.use('/dashboards', dashboardsRouter);
+
+// Metrics (monitoring)
+router.use('/metrics', metricsRouter);
 
 // Future: Add more route modules here
 // router.use('/users', userRouter);

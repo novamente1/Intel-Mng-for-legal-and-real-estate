@@ -11,7 +11,10 @@ import {
   errorHandler,
   notFoundHandler,
 } from './middleware';
+import { rateLimit, tenantRateLimit } from './middleware/rate-limit';
+import { MonitoringService } from './services/monitoring';
 import apiRouter from './routes';
+import healthRouter from './routes/health';
 
 /**
  * Application factory function
@@ -39,9 +42,21 @@ export function createApp(): Express {
   // Request logging middleware
   app.use(requestLogger);
 
+  // Monitoring middleware (track metrics)
+  app.use(MonitoringService.requestMetricsMiddleware());
+
+  // Global rate limiting (per tenant)
+  app.use(tenantRateLimit(
+    parseInt(process.env.RATE_LIMIT_TENANT_MAX || '1000', 10),
+    parseInt(process.env.RATE_LIMIT_TENANT_WINDOW_MS || '60000', 10)
+  ));
+
   // Body parsing middleware
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Health check routes (before API routes, no rate limiting)
+  app.use('/health', healthRouter);
 
   // API routes
   app.use(`/api/${config.app.apiVersion}`, apiRouter);

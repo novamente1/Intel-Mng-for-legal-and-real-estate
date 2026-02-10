@@ -18,11 +18,23 @@ class Database {
       return;
     }
 
+    // Load-safe defaults for production
+    const maxConnections = parseInt(process.env.DB_POOL_MAX || '20', 10);
+    const minConnections = parseInt(process.env.DB_POOL_MIN || '5', 10);
+    const connectionTimeout = parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '10000', 10);
+    const idleTimeout = parseInt(process.env.DB_IDLE_TIMEOUT_MS || '30000', 10);
+    const statementTimeout = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || '30000', 10);
+
     this.pool = new Pool({
       connectionString: config.database.url,
-      max: 20, // Maximum number of clients in the pool
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      max: maxConnections, // Maximum number of clients in the pool
+      min: minConnections, // Minimum number of clients in the pool
+      idleTimeoutMillis: idleTimeout, // Close idle clients after 30s
+      connectionTimeoutMillis: connectionTimeout, // Timeout when acquiring connection
+      statement_timeout: statementTimeout, // Query timeout
+      query_timeout: statementTimeout, // Query timeout (alternative)
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
     });
 
     // Handle pool errors
