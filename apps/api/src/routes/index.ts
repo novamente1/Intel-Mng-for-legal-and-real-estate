@@ -12,6 +12,7 @@ import workflowRouter from './workflow';
 import intelligenceRouter from './intelligence';
 import investorRouter from './investor';
 import realEstateAssetsRouter from './real-estate-assets';
+import financeRouter from './finance';
 import { config } from '../config';
 
 const router = Router();
@@ -60,6 +61,9 @@ router.use('/investor', investorRouter);
 // Real Estate Asset Management
 router.use('/assets', realEstateAssetsRouter);
 
+// Finance & Accounting
+router.use('/finance', financeRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
 // router.use('/roles', rolesRouter);
@@ -90,6 +94,7 @@ router.get('/', (req, res) => {
       intelligence: '/api/v1/intelligence',
       investor: '/api/v1/investor',
       assets: '/api/v1/assets',
+      finance: '/api/v1/finance',
       // Future: Add more endpoints as they're created
     },
   });
