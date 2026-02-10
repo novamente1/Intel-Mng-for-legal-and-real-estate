@@ -18,6 +18,7 @@ import matchingRouter from './matching';
 import knowledgeRouter from './knowledge';
 import qualityGatesRouter from './quality-gates';
 import superAdminRouter from './super-admin';
+import dashboardsRouter from './dashboards';
 import { config } from '../config';
 
 const router = Router();
@@ -84,6 +85,9 @@ router.use('/quality-gates', qualityGatesRouter);
 // Super Admin
 router.use('/super-admin', superAdminRouter);
 
+// Unified Dashboards
+router.use('/dashboards', dashboardsRouter);
+
 // Future: Add more route modules here
 // router.use('/users', userRouter);
 // router.use('/roles', rolesRouter);
@@ -120,6 +124,7 @@ router.get('/', (req, res) => {
       knowledge: '/api/v1/knowledge',
       quality_gates: '/api/v1/quality-gates',
       super_admin: '/api/v1/super-admin',
+      dashboards: '/api/v1/dashboards',
       // Future: Add more endpoints as they're created
     },
   });
